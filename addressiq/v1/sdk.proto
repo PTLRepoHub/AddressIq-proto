@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package addressiq.v1;
+
+option go_package = "github.com/addressiq/proto/addressiq/v1;addressiqv1";
+
+// ─── SDK lifecycle (Phase 3) ────────────────────────────────────────────
+
+enum LifecycleState {
+  LIFECYCLE_STATE_UNSPECIFIED = 0;
+  UNINITIALIZED = 1;
+  IDLE = 2;
+  COLLECTING = 3;
+  PAUSED = 4;
+  TERMINATED = 5;
+}
+
+message SdkUser {
+  string app_user_id = 1;
+  string phone = 2; // encrypted at rest on device — wire = plaintext under HTTPS
+  string email = 3;
+  string first_name = 4;
+  string last_name = 5;
+}
+
+message VerificationLifecycleState {
+  LifecycleState state = 1;
+  string app_user_id = 2;
+  string verification_id = 3;
+  string location_code = 4;
+  int64 paused_for_ms = 5;
+}
+
+enum PermissionStatus {
+  PERMISSION_STATUS_UNSPECIFIED = 0;
+  GRANTED = 1;
+  DENIED = 2;
+  NOT_DETERMINED = 3;
+  BLOCKED = 4;
+  PERMISSION_UNAVAILABLE = 5;
+}
+
+message PermissionState {
+  PermissionStatus foreground_location = 1;
+  PermissionStatus background_location = 2;
+  PermissionStatus notifications = 3;
+}
+
+// ─── SDK session invalidation (DELETE /v1/sdk/session) ──────────────────
+
+message InvalidateSessionRequest {
+  string app_user_id = 1;
+  string verification_code = 2;
+}
+
+message InvalidateSessionResponse {
+  bool revoked = 1;
+}

@@ -1,0 +1,6 @@
+# buf
+*.bin
+
+# OS / editor
+.DS_Store
+*.swp

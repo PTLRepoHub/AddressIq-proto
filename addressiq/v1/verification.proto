@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package addressiq.v1;
+
+import "addressiq/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/addressiq/proto/addressiq/v1;addressiqv1";
+
+// ─── Verification primitives ────────────────────────────────────────────
+
+enum VerificationType {
+  VERIFICATION_TYPE_UNSPECIFIED = 0;
+  DIGITAL = 1;
+  PHYSICAL = 2;
+  COMBINED = 3;
+}
+
+enum VerificationStatus {
+  VERIFICATION_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  ASSIGNED = 2;
+  IN_PROGRESS = 3;
+  VERIFIED = 4;
+  NOT_AT_ADDRESS = 5;
+  STATUS_UNKNOWN = 6;
+  FAILED = 7;
+  EXPIRED = 8;
+  CANCELLED = 9;
+  UNDER_REVIEW = 10;
+}
+
+enum ReviewState {
+  REVIEW_STATE_UNSPECIFIED = 0;
+  NONE = 1;
+  FLAGGED = 2;
+  MANUAL_REVIEW = 3;
+  ESCALATED = 4;
+  RESOLVED = 5;
+}
+
+message Verification {
+  string id = 1;
+  string verification_code = 2;
+  string organization_id = 3;
+  string app_id = 4;
+  string branch_id = 5;
+  string app_user_id = 6;
+  string location_id = 7;
+
+  VerificationType type = 8;
+  string provider = 9; // slug
+  string provider_reference_id = 10;
+  VerificationStatus status = 11;
+  ReviewState review_state = 12;
+
+  double confidence_score = 13;
+  google.protobuf.Timestamp window_ends_at = 14;
+  google.protobuf.Timestamp resolved_at = 15;
+}
+
+message Location {
+  string id = 1;
+  string location_code = 2;
+  GeoPoint position = 3;
+  int32 geofence_radius_m = 4;
+  // Phase 3 — adaptive radius the SDK MUST honor when registering OS geofences.
+  int32 adaptive_geofence_radius_meters = 5;
+  EnvironmentBucket environment = 6;
+}

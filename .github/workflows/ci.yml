@@ -1,0 +1,28 @@
+name: buf
+
+# Lint, format-check, build, and breaking-change detection on every push/PR.
+# On pushes to main and on version tags, the proto module is published to the
+# Buf Schema Registry — but only if a BUF_TOKEN secret is configured. Without
+# the token the push step is skipped, so CI stays green before BSR is set up.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  buf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with:
+          # Empty when the secret is unset → buf-action skips the push and
+          # only runs lint / format / build / breaking.
+          token: ${{ secrets.BUF_TOKEN }}
+          # Compare against the default branch for breaking-change detection.
+          breaking_against: 'https://github.com/${{ github.repository }}.git#branch=main'

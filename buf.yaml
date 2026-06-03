@@ -1,0 +1,15 @@
+version: v2
+modules:
+  - path: .
+    name: buf.build/addressiq/addressiq
+lint:
+  use:
+    - STANDARD
+  except:
+    # The wire contract predates buf lint; enum values are intentionally
+    # unprefixed (e.g. PENDING, DIGITAL). Renaming them is a breaking change
+    # to every generated SDK, so the prefix rule is disabled by design.
+    - ENUM_VALUE_PREFIX
+breaking:
+  use:
+    - FILE
