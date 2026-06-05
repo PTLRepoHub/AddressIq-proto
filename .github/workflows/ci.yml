@@ -21,8 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-action@v1
         with:
-          # Empty when the secret is unset → buf-action skips the push and
-          # only runs lint / format / build / breaking.
           token: ${{ secrets.BUF_TOKEN }}
+          # Only publish to the BSR when a token is configured; otherwise the
+          # push step fails with an auth error. Until then CI just runs
+          # lint / format / build / breaking.
+          push: ${{ secrets.BUF_TOKEN != '' }}
           # Compare against the default branch for breaking-change detection.
           breaking_against: 'https://github.com/${{ github.repository }}.git#branch=main'
