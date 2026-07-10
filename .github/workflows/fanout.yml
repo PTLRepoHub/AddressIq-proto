@@ -1,0 +1,181 @@
+name: fanout
+
+# When a proto release is published, open a "regen against proto vX.Y.Z" PR in
+# every consumer SDK repo. Each PR:
+#   1. repins buf.gen.yaml from `branch: main` (or the previous tag) to the new tag
+#   2. writes .proto-version
+#   3. runs `buf generate` and commits the resulting bindings
+#
+# The PR's commit type carries the version linkage: a proto MAJOR bump lands as
+# `feat(proto)!:` so release-please majors the SDK; anything else lands as
+# `feat(proto):` for a minor. This is the whole proto→SDK version mechanism —
+# there is no custom version math anywhere.
+#
+# Cross-repo writes need a GitHub App token; the default GITHUB_TOKEN is scoped
+# to this repo only. Same App as release-please (see release-please.yml).
+#
+# The token is minted per matrix leg and narrowed to that one consumer repo
+# (`repositories: ${{ matrix.repo }}`), so a leg that writes to addressiq-ios
+# holds no credential for addressiq-android.
+#
+# Required secrets: ADDRESSIQ_BOT_APP_ID, ADDRESSIQ_BOT_PRIVATE_KEY
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      proto_tag:
+        description: "Proto tag to fan out (e.g. v0.1.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Generate and diff, but open no PRs"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  fanout:
+    name: ${{ matrix.repo }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: addressiq-web
+            generate: buf generate
+          - repo: addressiq-react-native
+            generate: buf generate
+          - repo: addressiq-android
+            generate: buf generate
+          - repo: addressiq-ios
+            generate: buf generate
+          # Dart has no runtime for the well-known types; they must be generated.
+          - repo: addressiq-flutter
+            generate: buf generate --include-imports --include-wkt
+
+    steps:
+      - name: Resolve proto tag
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.proto_tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "release" ]; then TAG="$RELEASE_TAG"; else TAG="$INPUT_TAG"; fi
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Unexpected proto tag '$TAG' (want vX.Y.Z)" >&2; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Was this a MAJOR bump?
+        id: semver
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --bare \
+            "https://github.com/${{ github.repository }}.git" proto.git
+          # Previous release tag, ordered by semver, excluding the current one.
+          PREV=$(git -C proto.git tag --list 'v*.*.*' --sort=-v:refname \
+                 | grep -vFx "$TAG" | head -1 || true)
+          NEW_MAJOR=${TAG#v}; NEW_MAJOR=${NEW_MAJOR%%.*}
+          if [ -z "$PREV" ]; then
+            BREAKING=false   # first release is never "breaking"
+          else
+            PREV_MAJOR=${PREV#v}; PREV_MAJOR=${PREV_MAJOR%%.*}
+            [ "$NEW_MAJOR" != "$PREV_MAJOR" ] && BREAKING=true || BREAKING=false
+          fi
+          echo "prev=${PREV:-none}" >> "$GITHUB_OUTPUT"
+          echo "breaking=$BREAKING" >> "$GITHUB_OUTPUT"
+          echo "Proto $PREV -> $TAG (breaking=$BREAKING)"
+
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ADDRESSIQ_BOT_APP_ID }}
+          private-key: ${{ secrets.ADDRESSIQ_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repo }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/${{ matrix.repo }}
+          token: ${{ steps.app-token.outputs.token }}
+          ref: main
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: Repin buf.gen.yaml and regenerate
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test -f buf.gen.yaml || { echo "::error::no buf.gen.yaml in ${{ matrix.repo }}" >&2; exit 1; }
+
+          # Replace whichever pin is present (branch: main, or an older tag:)
+          # with the new tag. Indentation is preserved.
+          # NB: '#' delimiter — '|' would collide with the (branch|tag) alternation.
+          before=$(sha1sum buf.gen.yaml | cut -d' ' -f1)
+          sed -i -E "s#^([[:space:]]*)(branch|tag):[[:space:]]*.*\$#\1tag: ${TAG}#" buf.gen.yaml
+          after=$(sha1sum buf.gen.yaml | cut -d' ' -f1)
+          if [ "$before" = "$after" ]; then
+            echo "::warning::buf.gen.yaml pin unchanged — already at ${TAG}?"
+          fi
+          grep -qE "^[[:space:]]*tag:[[:space:]]*${TAG}$" buf.gen.yaml \
+            || { echo "::error::repin failed"; cat buf.gen.yaml; exit 1; }
+
+          printf '%s\n' "$TAG" > .proto-version
+          ${{ matrix.generate }}
+
+      - name: Anything to do?
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No binding or pin changes for ${{ matrix.repo }} — nothing to PR."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat
+          fi
+
+      - name: Open regen PR
+        if: steps.diff.outputs.changed == 'true' && inputs.dry_run != true
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: proto/${{ steps.tag.outputs.tag }}
+          base: main
+          # `feat(proto)!:` majors the SDK; `feat(proto):` minors it.
+          commit-message: |
+            ${{ steps.semver.outputs.breaking == 'true'
+                && format('feat(proto)!: regen against proto {0}', steps.tag.outputs.tag)
+                || format('feat(proto): regen against proto {0}', steps.tag.outputs.tag) }}
+
+            ${{ steps.semver.outputs.breaking == 'true'
+                && format('BREAKING CHANGE: wire contract majored ({0} -> {1}).', steps.semver.outputs.prev, steps.tag.outputs.tag)
+                || '' }}
+          title: >-
+            ${{ steps.semver.outputs.breaking == 'true'
+                && format('feat(proto)!: regen against proto {0}', steps.tag.outputs.tag)
+                || format('feat(proto): regen against proto {0}', steps.tag.outputs.tag) }}
+          body: |
+            Automated regeneration against [`${{ steps.tag.outputs.tag }}`](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}).
+
+            - `buf.gen.yaml` repinned to `tag: ${{ steps.tag.outputs.tag }}` (was `${{ steps.semver.outputs.prev }}`)
+            - `.proto-version` updated
+            - bindings regenerated with `${{ matrix.generate }}`
+
+            **Breaking:** `${{ steps.semver.outputs.breaking }}` — this PR will cause release-please to cut a
+            ${{ steps.semver.outputs.breaking == 'true' && 'MAJOR' || 'MINOR' }} release of this SDK on merge.
+
+            Generated by `fanout.yml` in `${{ github.repository }}`.
+          labels: proto-sync
+          delete-branch: true
