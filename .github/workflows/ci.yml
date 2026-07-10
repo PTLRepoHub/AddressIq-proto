@@ -13,6 +13,11 @@ on:
 
 permissions:
   contents: read
+  # buf-action posts its lint/breaking summary as a PR comment. Without this the
+  # run fails with "Resource not accessible by integration" at the comment step,
+  # after the checks themselves have already passed. Only surfaced once the repo
+  # got its first pull request (the release-please one).
+  pull-requests: write
 
 jobs:
   buf:
