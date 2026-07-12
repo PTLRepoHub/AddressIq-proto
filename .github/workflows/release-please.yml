@@ -3,10 +3,11 @@ name: release-please
 # Maintains a "chore: release X.Y.Z" PR from Conventional Commits on main.
 # Merging that PR writes CHANGELOG.md, bumps the version, and pushes tag vX.Y.Z.
 #
-# The tag is what triggers release.yml (which publishes to the registry).
-# GitHub does NOT fire workflows for events created with the default
-# GITHUB_TOKEN, so this job mints a GitHub App token instead — an App-authored
-# tag push *does* trigger release.yml.
+# The tag is what triggers the BSR publish: ci.yml runs on v* tags and pushes
+# the module to the Buf Schema Registry (gated on BUF_TOKEN). GitHub does NOT
+# fire workflows for events created with the default GITHUB_TOKEN, so this job
+# mints a GitHub App token instead — an App-authored tag push *does* trigger
+# ci.yml.
 #
 # Required secrets: ADDRESSIQ_BOT_APP_ID, ADDRESSIQ_BOT_PRIVATE_KEY
 
