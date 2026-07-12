@@ -27,9 +27,11 @@ jobs:
       - uses: bufbuild/buf-action@v1
         with:
           token: ${{ secrets.BUF_TOKEN }}
-          # Only publish to the BSR when a token is configured; otherwise the
-          # push step fails with an auth error. Until then CI just runs
+          # Only publish to the BSR on real pushes to main / version tags, and
+          # only when a token is configured. Never push on pull_request: the PR
+          # HEAD is a merge commit with no branch/tag, so `buf push` fails with
+          # "no tags or branches found for HEAD". PRs still run
           # lint / format / build / breaking.
-          push: ${{ secrets.BUF_TOKEN != '' }}
+          push: ${{ github.event_name == 'push' && secrets.BUF_TOKEN != '' }}
           # Compare against the default branch for breaking-change detection.
           breaking_against: 'https://github.com/${{ github.repository }}.git#branch=main'
